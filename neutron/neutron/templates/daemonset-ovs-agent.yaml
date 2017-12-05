@@ -1,0 +1,254 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.daemonset_ovs_agent }}
+{{- $envAll := . }}
+{{- $dependencies := .Values.dependencies.ovs_agent }}
+{{- $mounts_neutron_ovs_agent := .Values.pod.mounts.neutron_ovs_agent.neutron_ovs_agent }}
+{{- $mounts_neutron_ovs_agent_init := .Values.pod.mounts.neutron_ovs_agent.init_container }}
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: neutron-ovs-agent
+spec:
+{{ tuple $envAll "ovs_agent" | include "helm-toolkit.snippets.kubernetes_upgrades_daemonset" | indent 2 }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "neutron" "neutron-ovs-agent" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+      nodeSelector:
+        {{ .Values.labels.ovs.node_selector_key }}: {{ .Values.labels.ovs.node_selector_value }}
+      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: true
+      initContainers:
+{{ tuple $envAll $dependencies $mounts_neutron_ovs_agent_init | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+        - name: neutron-openvswitch-agent-kernel-modules
+          image: {{ .Values.images.tags.neutron_openvswitch_agent }}
+          imagePullPolicy: {{ .Values.images.pull_policy }}
+          securityContext:
+            capabilities:
+              add:
+                - SYS_MODULE
+            runAsUser: 0
+          command:
+            - /tmp/neutron-openvswitch-agent-init-modules.sh
+          volumeMounts:
+            - name: neutron-bin
+              mountPath: /tmp/neutron-openvswitch-agent-init-modules.sh
+              subPath: neutron-openvswitch-agent-init-modules.sh
+              readOnly: true
+            - name: host-rootfs
+              mountPath: /mnt/host-rootfs
+              readOnly: true
+        - name: neutron-ovs-agent-init
+          image: {{ .Values.images.tags.neutron_openvswitch_agent }}
+          imagePullPolicy: {{ .Values.images.pull_policy }}
+{{ tuple $envAll $envAll.Values.pod.resources.agent.ovs | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - /tmp/neutron-openvswitch-agent-init.sh
+          volumeMounts:
+            - name: neutron-bin
+              mountPath: /tmp/neutron-openvswitch-agent-init.sh
+              subPath: neutron-openvswitch-agent-init.sh
+              readOnly: true
+            - name: pod-shared
+              mountPath: /tmp/pod-shared
+            - name: neutron-etc
+              mountPath: /etc/neutron/neutron.conf
+              subPath: neutron.conf
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/plugins/ml2/ml2_conf.ini
+              subPath: ml2_conf.ini
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/plugins/ml2/openvswitch_agent.ini
+              subPath: openvswitch_agent.ini
+              readOnly: true
+            - name: neutron-etc
+              # NOTE (Portdirect): We mount here to override Kollas
+              # custom sudoers file when using Kolla images, this
+              # location will also work fine for other images.
+              mountPath: /etc/sudoers.d/kolla_neutron_sudoers
+              subPath: neutron_sudoers
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.conf
+              subPath: rootwrap.conf
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/debug.filters
+              subPath: debug.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/dibbler.filters
+              subPath: dibbler.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/ipset-firewall.filters
+              subPath: ipset-firewall.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/l3.filters
+              subPath: l3.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/netns-cleanup.filters
+              subPath: netns-cleanup.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/dhcp.filters
+              subPath: dhcp.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/ebtables.filters
+              subPath: ebtables.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/iptables-firewall.filters
+              subPath: iptables-firewall.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/linuxbridge-plugin.filters
+              subPath: linuxbridge-plugin.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/openvswitch-plugin.filters
+              subPath: openvswitch-plugin.filters
+              readOnly: true
+            - name: run
+              mountPath: /run
+{{ if $mounts_neutron_ovs_agent.volumeMounts }}{{ toYaml $mounts_neutron_ovs_agent.volumeMounts | indent 12 }}{{ end }}
+      containers:
+        - name: neutron-ovs-agent
+          image: {{ .Values.images.tags.neutron_openvswitch_agent }}
+          imagePullPolicy: {{ .Values.images.pull_policy }}
+{{ tuple $envAll $envAll.Values.pod.resources.agent.ovs | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          securityContext:
+            runAsUser: {{ .Values.pod.user.neutron.uid }}
+            privileged: true
+          command:
+            - /tmp/neutron-openvswitch-agent.sh
+          # ensures this container can can see a br-int
+          # bridge before its marked as ready
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - 'ovs-vsctl list-br | grep -q br-int'
+          volumeMounts:
+            - name: neutron-bin
+              mountPath: /tmp/neutron-openvswitch-agent.sh
+              subPath: neutron-openvswitch-agent.sh
+              readOnly: true
+            - name: pod-shared
+              mountPath: /tmp/pod-shared
+            - name: neutron-etc
+              mountPath: /etc/neutron/neutron.conf
+              subPath: neutron.conf
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/plugins/ml2/ml2_conf.ini
+              subPath: ml2_conf.ini
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/plugins/ml2/openvswitch_agent.ini
+              subPath: openvswitch_agent.ini
+              readOnly: true
+            - name: neutron-etc
+              # NOTE (Portdirect): We mount here to override Kollas
+              # custom sudoers file when using Kolla images, this
+              # location will also work fine for other images.
+              mountPath: /etc/sudoers.d/kolla_neutron_sudoers
+              subPath: neutron_sudoers
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.conf
+              subPath: rootwrap.conf
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/debug.filters
+              subPath: debug.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/dibbler.filters
+              subPath: dibbler.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/ipset-firewall.filters
+              subPath: ipset-firewall.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/l3.filters
+              subPath: l3.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/netns-cleanup.filters
+              subPath: netns-cleanup.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/dhcp.filters
+              subPath: dhcp.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/ebtables.filters
+              subPath: ebtables.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/iptables-firewall.filters
+              subPath: iptables-firewall.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/linuxbridge-plugin.filters
+              subPath: linuxbridge-plugin.filters
+              readOnly: true
+            - name: neutron-etc
+              mountPath: /etc/neutron/rootwrap.d/openvswitch-plugin.filters
+              subPath: openvswitch-plugin.filters
+              readOnly: true
+            - name: run
+              mountPath: /run
+{{ if $mounts_neutron_ovs_agent.volumeMounts }}{{ toYaml $mounts_neutron_ovs_agent.volumeMounts | indent 12 }}{{ end }}
+      volumes:
+        - name: varlibopenvswitch
+          emptyDir: {}
+        - name: pod-shared
+          emptyDir: {}
+        - name: neutron-bin
+          configMap:
+            name: neutron-bin
+            defaultMode: 0555
+        - name: neutron-etc
+          configMap:
+            name: neutron-etc
+            defaultMode: 0444
+        - name: run
+          hostPath:
+            path: /run
+        - name: host-rootfs
+          hostPath:
+            path: /
+{{ if $mounts_neutron_ovs_agent.volumes }}{{ toYaml $mounts_neutron_ovs_agent.volumes | indent 8 }}{{ end }}
+{{- end }}
